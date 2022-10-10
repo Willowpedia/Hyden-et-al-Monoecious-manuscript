@@ -1,0 +1,288 @@
+#######################DNA-Seq#################################
+#trimmomatic
+for file in *_R1_001.fastq.gz
+do
+  baseFilename=`basename $file _R1_001.fastq.gz`
+  echo "${baseFilename}"
+  trimmomatic PE -threads 24 -phred33 -trimlog "${baseFilename}".log -validatePairs  "${baseFilename}"_R1_001.fastq.gz "${baseFilename}"_R2_001.fastq.gz "${baseFilename}"_1P.fastq.gz "${baseFilename}"_1U.fastq.gz "${baseFilename}"_2P.fastq.gz "${baseFilename}"_2U.fastq.gz ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+done
+
+#alignment to 94006 reference
+bwa index Spurpurea_519_v5.0.fa
+
+for file in *_1P.fastq.gz
+do
+	baseFilename=`basename $file _1P.fastq.gz`
+  echo "${baseFilename}"
+  bwa mem -M -t 24 Spurpurea_519_v5.0.fa "${baseFilename}"_1P.fastq.gz "${baseFilename}"_2P.fastq.gz | samtools sort -@24 -o "${baseFilename}".sorted.bam
+  samtools index "${baseFilename}".sorted.bam
+done
+
+#mark duplicates
+
+picard MarkDuplicates I=Difazio_gDNA_20_19X-562-052_C_S19_L001.sorted.bam O=Difazio_gDNA_20_19X-562-052_C_S19_L001.dedup.bam M=Difazio_gDNA_20_19X-562-052_C_S19_L001.dedup.metrics.txt USE_JDK_DEFLATER=true USE_JDK_INFLATER=true CREATE_INDEX=true
+
+#merge re-runs
+#samtools merge -@24 -o <outputname> <input1> <input2>
+samtools merge -@24 19X-562-052_2_merged.dedup.bam Difazio_gDNA_20_19X-562-052_C_S19_L001.dedup.bam 19X-562-052_merged.dedup.bam
+samtools index 19X-562-052_2_merged.dedup.bam
+
+#caculate coverage
+for file in *.dedup.bam
+do
+  baseFilename=`basename $file .dedup.bam`
+  echo "${baseFilename}"
+  samtools depth "${baseFilename}".dedup.bam | awk '{sum+=$3;cnt++} END { print sum/cnt" "sum" "sum/329300000}'
+done > coverage_monoecious_families.txt
+
+#create 94003+94006 reference
+cat Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.p_utg.fa > 94006v5_94003.fa
+#create 94003+Fish Creek reference
+cat SpurpureaFishCreek_518_v3.0.fa 94003_HiFi_assembly.asm.bp.p_utg.fa > FCv3_94003.fa
+
+#map 232 family to 94006+94003 reference
+cd ../19X-232
+cp ../94006v5_94003.fa .
+bwa index 94006v5_94003.fa
+for file in *_1P.fastq.gz
+do
+	baseFilename=`basename $file _1P.fastq.gz`
+  echo "${baseFilename}"
+  bwa mem -M -t 24 94006v5_94003.fa "${baseFilename}"_1P.fastq.gz "${baseFilename}"_2P.fastq.gz | samtools sort -@24 -o "${baseFilename}".94003_94006.sorted.bam
+  samtools index "${baseFilename}".94003_94006.sorted.bam
+done
+
+mv *.bam ..
+mv *.bai ..
+
+#map 562 family to FC+94003 reference
+cd ../19X-562
+cp ../FCv3_94003.fa .
+bwa index FCv3_94003.fa
+for file in *_1P.fastq.gz
+do
+	baseFilename=`basename $file _1P.fastq.gz`
+  echo "${baseFilename}"
+  bwa mem -M -t 40 FCv3_94003.fa "${baseFilename}"_1P.fastq.gz "${baseFilename}"_2P.fastq.gz | samtools sort -@40 -o "${baseFilename}".94003_FC.sorted.bam
+  samtools index "${baseFilename}".94003_FC.sorted.bam
+done
+
+mv *.bam ..
+mv *.bai ..
+
+#map 551 family to 94003
+cd ../18X-551/
+cp ../94003_HiFi_assembly.asm.bp.p_utg.fa .
+bwa index 94003_HiFi_assembly.asm.bp.p_utg.fa
+
+for file in *_1P.fastq.gz
+do
+	baseFilename=`basename $file _1P.fastq.gz`
+  echo "${baseFilename}"
+  bwa mem -M -t 40 94003_HiFi_assembly.asm.bp.p_utg.fa "${baseFilename}"_1P.fastq.gz "${baseFilename}"_2P.fastq.gz | samtools sort -@40 -o "${baseFilename}".94003.sorted.bam
+  samtools index "${baseFilename}".94003.sorted.bam
+done
+
+bwa mem -M -t 24 94006v5_94003.fa 19X-232-200_S16_L001_1P.fastq.gz 19X-232-200_S16_L001_2P.fastq.gz | samtools sort -@24 -o 19X-232-200_S16_L001.94003_94006.sorted.bam
+bwa mem -M -t 24 94006v5_94003.fa Difazio-Cornell_19X-232-042_5_S1_L001_1P.fastq.gz Difazio-Cornell_19X-232-042_5_S1_L001_2P.fastq.gz | samtools sort -@24 -o Difazio-Cornell_19X-232-042_5_S1_L001.94003_94006.sorted.bam
+bwa mem -M -t 24 94006v5_94003.fa Difazio-Cornell_19X-232-088_11_S2_L001_1P.fastq.gz Difazio-Cornell_19X-232-088_11_S2_L001_2P.fastq.gz | samtools sort -@24 -o Difazio-Cornell_19X-232-088_11_S2_L001.94003_94006.sorted.bam
+
+mv *.bam ..
+mv *.bai ..
+
+#mark duplicates
+for file in *.sorted.bam
+do
+	baseFilename=`basename $file .sorted.bam`
+	echo "${baseFilename}"
+	picard MarkDuplicates I=$file O="${baseFilename}".dedup.bam M="${baseFilename}".dedup.metrics.txt USE_JDK_DEFLATER=true USE_JDK_INFLATER=true CREATE_INDEX=true
+done
+
+java -jar /programs/picard-tools-2.26.1/picard.jar
+
+#merge re-runs
+samtools merge -@24 -o <outputname> <input1> <input2>
+samtools merge 19X-562-052_merged.dedup.bam Difazio-Cornell_19X-562-052_20_S3_L001.94003_FC.dedup.bam Difazio_gDNA_20_19X-562-052_C_S19_L001.94003_FC.dedup.bam
+samtools index 19X-562-052_merged.dedup.bam
+
+samtools merge 19X-232-042.94003_94006_merged.dedup.bam 19X-232-042_S5_L001.94003_94006.dedup.bam Difazio-Cornell_19X-232-042_5_S1_L001.94003_94006.dedup.bam
+samtools index 19X-232-042.94003_94006_merged.dedup.bam
+
+samtools merge 19X-232-088.94003_94006_merged.dedup.bam 19X-232-088_S10_L001.94003_94006.dedup.bam Difazio-Cornell_19X-232-088_11_S2_L001.94003_94006.dedup.bam
+samtools index 19X-232-088.94003_94006_merged.dedup.bam
+
+samtools merge 19X-562-165.94003_FC_merged.dedup.bam 19X-562-165_S21_L001.94003_FC.dedup.bam Difazio-Cornell_19X-562-165_22_S4_L001.94003_FC.dedup.bam
+samtools index 19X-562-165.94003_FC_merged.dedup.bam
+
+samtools merge 19X-562-355.94003_FC_merged.dedup.bam 19X-562-355_S40_L001.94003_FC.dedup.bam Difazio-Cornell_19X-562-355_25_S33_L001.94003_FC.dedup.bam
+samtools index 19X-562-355.94003_FC_merged.dedup.bam
+
+
+#caculate coverage
+for file in *.dedup.bam
+do
+  baseFilename=`basename $file .dedup.bam`
+  echo "${baseFilename}"
+  samtools depth "${baseFilename}".dedup.bam | awk '{sum+=$3;cnt++} END { print sum/cnt" "sum" "sum/329300000}'
+done > coverage_monoecious_families.txt
+
+###################################RNA-Seq#######################################
+#run fastqc
+cd /Volumes/My\ Book/Monoecious_families_RNA-Seq/Salix/
+fastqc *.gz
+mkdir fastqc
+mv *.zip fastqc
+mv *.html fastqc
+#trimmomatic
+#adapter: AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC
+#cat 13437_32540_166638_HGCCFBGXM_plate_1_H03_19X_562_328_AATAGC_R1.fastq | awk 'NR%4==2' | head -1000000 | grep  AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC | wc -l
+#49
+for file in *_R1.fastq.gz
+do
+	baseFilename=`basename $file _R1.fastq.gz`
+	echo "${baseFilename}"
+	trimmomatic SE -threads 24 -phred33 -trimlog "${baseFilename}".log "${baseFilename}"_R1.fastq.gz "${baseFilename}"_trimmed.fastq.gz LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:25
+done
+
+
+mkdir trimmed
+mkdir raw_data
+mv *_trimmed.fastq.gz trimmed/
+mv *_R1.fastq.gz raw_data/
+
+#map to 94006 reference
+/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 40 --runMode genomeGenerate --genomeDir STAR_genome_directory --genomeFastaFiles Spurpurea_519_v5.0.fa --sjdbGTFfile Spurpurea_519_v5.1.gene_exons.gff3 --sjdbGTFtagExonParentTranscript Parent --sjdbOverhang 84
+pigz -d *.fastq.gz
+for file in *_trimmed.fastq
+do
+	baseFilename=`basename $file _trimmed.fastq`
+	echo "${baseFilename}"
+	/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 8 --runMode alignReads --genomeDir ../folder_1/STAR_genome_directory --readFilesIn "${baseFilename}"_trimmed.fastq --outFileNamePrefix "${baseFilename}"_ --outReadsUnmapped Fasta --outSAMtype BAM Unsorted
+  samtools sort -o "${baseFilename}"_Aligned.out.sorted.bam -@ 8 "${baseFilename}"_Aligned.out.bam
+  samtools index "${baseFilename}"_Aligned.out.sorted.bam
+	echo finished "${baseFilename}"
+done
+
+#map to 94003
+/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 8 --runMode genomeGenerate --genomeDir STAR_genome_directory_1 --genomeFastaFiles 94003_HiFi_assembly.asm.bp.p_utg.fa --sjdbGTFfile 94003_rnd3.genes.gff --sjdbGTFtagExonParentTranscript Parent --sjdbOverhang 84
+pigz -d *.fastq.gz
+for file in *_trimmed.fastq
+do
+	baseFilename=`basename $file _trimmed.fastq`
+	echo "${baseFilename}"
+	/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 8 --runMode alignReads --genomeDir ../STAR_genome_directory_1 --readFilesIn "${baseFilename}"_trimmed.fastq --outFileNamePrefix "${baseFilename}"_94003_ --outReadsUnmapped Fasta --outSAMtype BAM Unsorted
+  samtools sort -o "${baseFilename}"_94003_Aligned.out.sorted.bam -@ 8 "${baseFilename}"_94003_Aligned.out.bam
+  samtools index "${baseFilename}"_94003_Aligned.out.sorted.bam
+	echo finished "${baseFilename}"
+done
+
+#map to 94003+94006
+/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 8 --runMode genomeGenerate --genomeDir STAR_genome_directory_1 --genomeFastaFiles 94006v5_94003.fa --sjdbGTFfile 94006_94003_genes.gff3 --sjdbGTFtagExonParentTranscript Parent --sjdbOverhang 84
+pigz -d *.fastq.gz
+for file in *_trimmed.fastq
+do
+	baseFilename=`basename $file _trimmed.fastq`
+	echo "${baseFilename}"
+	/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 8 --runMode alignReads --genomeDir STAR_genome_directory_1 --readFilesIn "${baseFilename}"_trimmed.fastq --outFileNamePrefix "${baseFilename}"_94003_94006_ --outReadsUnmapped Fasta --outSAMtype BAM Unsorted
+  samtools sort -o "${baseFilename}"_94003_94006_Aligned.out.sorted.bam -@ 8 "${baseFilename}"_94003_94006_Aligned.out.bam
+  samtools index "${baseFilename}"_94003_94006_Aligned.out.sorted.bam
+	echo finished "${baseFilename}"
+done
+
+#map to 94003+FC
+/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 8 --runMode genomeGenerate --genomeDir STAR_genome_directory_1 --genomeFastaFiles FCv3_94003.fa --sjdbGTFfile FC_94003_genes.gff3 --sjdbGTFtagExonParentTranscript Parent --sjdbOverhang 84
+pigz -d *.fastq.gz
+for file in *_trimmed.fastq
+do
+	baseFilename=`basename $file _trimmed.fastq`
+	echo "${baseFilename}"
+	/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 8 --runMode alignReads --genomeDir STAR_genome_directory_1 --readFilesIn "${baseFilename}"_trimmed.fastq --outFileNamePrefix "${baseFilename}"_94003_FC_ --outReadsUnmapped Fasta --outSAMtype BAM Unsorted
+  samtools sort -o "${baseFilename}"_94003_FC_Aligned.out.sorted.bam -@ 8 "${baseFilename}"_94003_FC_Aligned.out.bam
+  samtools index "${baseFilename}"_94003_FC_Aligned.out.sorted.bam
+	echo finished "${baseFilename}"
+done
+
+#map 94003 to 94003 reference
+/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 22 --runMode genomeGenerate --genomeDir STAR_genome_directory --genomeFastaFiles 94003_HiFi_assembly.asm.bp.p_utg.fa --sjdbGTFfile 94003_rnd3.genes.gff --sjdbGTFtagExonParentTranscript Parent --sjdbOverhang 149
+pigz -d *.fq.gz
+for file in *_1.fq
+do
+	baseFilename=`basename $file _1.fq`
+	echo "${baseFilename}"
+	/programs/STAR-2.7.9a/bin/Linux_x86_64_static/STAR --runThreadN 22 --runMode alignReads --genomeDir STAR_genome_directory --readFilesIn "${baseFilename}"_1.fq "${baseFilename}"_2.fq --outFileNamePrefix "${baseFilename}"_94003_ --outReadsUnmapped Fasta --outSAMtype BAM Unsorted
+  samtools sort -o "${baseFilename}"_94003_Aligned.out.sorted.bam -@ 22 "${baseFilename}"_94003_Aligned.out.bam
+  samtools index "${baseFilename}"_94003_Aligned.out.sorted.bam
+	echo finished "${baseFilename}"
+done
+
+samtools merge 94003_mapped_94003_merged.bam 9705.8.141512.ACTTGA_94003_Aligned.out.sorted.bam 9705.8.141512.CAGATC_94003_Aligned.out.sorted.bam 9727.4.142308.GATCAG_94003_Aligned.out.sorted.bam
+samtools index 94003_mapped_94003_merged.bam
+#Generate mapping statistics
+for file in *.final.out
+do
+	sed -n 10p $file | grep -o -E '[0-9.]+' >> aligned_reads_stats.txt
+done
+
+#Generate counts 94006 reference
+PATH=$PATH:/Volumes/Hyden/blh226/subread-1.6.4-source/bin
+mkdir counts
+
+for file in *.sorted.bam
+do
+	baseFilename=`basename $file _Aligned.out.sorted.bam`
+	echo "${baseFilename}"
+	featureCounts "${baseFilename}"_Aligned.out.sorted.bam -a Spurpurea_519_v5.1.gene_exons.gff3 -o counts/"${baseFilename}"_counts.tsv -g 'Parent' -M -p -T 22
+
+done
+
+cd counts
+R
+#read in all files
+list<-list.files(pattern="*.tsv")
+list2<-c()
+for(i in 1:27){
+	list2<-c(list2, list[2*i-1])
+}
+list<-list2 #list is all files minus summary files
+allfiles<-lapply(list, read.table)
+for(i in 1:length(allfiles)){
+	colnames(allfiles[[i]])<-as.character(unlist(allfiles[[i]][1,]))
+	allfiles[[i]]<-allfiles[[i]][-1,]
+	allfiles[[i]]$Chr<-gsub(";.*","",allfiles[[i]]$Chr)
+  allfiles[[i]]$Start<-gsub(";.*","",allfiles[[i]]$Start)
+  allfiles[[i]]$End<-gsub(";.*","",allfiles[[i]]$End)
+  allfiles[[i]]$Strand<-gsub(";.*","",allfiles[[i]]$Strand)
+	allfiles[[i]][7]<-as.numeric(unlist(allfiles[[i]][7]))
+} #gives list of all files with first row as column names, removes excess chromosome names
+#combine all files into single table (note, nested for loop takes a long time)
+allfilescombined<-as.character(allfiles[[1]]$Geneid) #Gives vector with geneids
+for(i in 1:length(allfiles)){
+	temp<-allfiles[[i]] #temp has one file in it
+	vec<-c() #holding variable
+	for(j in 1:length(temp$Geneid)){
+		vec<-c(vec, temp[j,7]) #vec is a vector of gene counts
+	}
+	allfilescombined<-cbind(allfilescombined, vec) #allfilescombined is a dataframe containing geneid in the first column, and counts by sample in the remaining columns
+}
+#create header with sample/file names
+colnames(allfilescombined)<-c('Geneid', list) #gives appropriate column names
+write.csv(allfilescombined, 'final_counts_combined.csv')
+
+library('DESeq2')
+coldata<-read.csv('final_counts_combined_filtered.csv', row.names=1)
+rownames(coldata)<-sub(".v5.1", "", rownames(coldata))
+cts<-coldata
+coldata<-read.csv('info_filtered.csv')
+dds<-DESeqDataSetFromMatrix(countData=cts, colData=coldata, design= ~Sex)
+dds<-DESeq(dds)
+res<-results(dds)
+resMvsF<-results(dds, contrast=c("Sex","M","F"))
+resHvsF<-results(dds, contrast=c("Sex","H","F"))
+resHvsM<-results(dds, contrast=c("Sex","H","M"))
+write.csv(resMvsF, "MvsF_DESEQ2_results_filtered.csv")
+write.csv(resHvsF, "HvsF_DESEQ2_results_filtered.csv")
+write.csv(resHvsM, "HvsM_DESEQ2_results_filtered.csv")
+
+plotMA(resMvsF, ylim=c(-10,10))
+plotMA(resHvsF, ylim=c(-10,10))
+plotMA(resHvsM, ylim=c(-10,10))

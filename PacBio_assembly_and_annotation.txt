@@ -1,0 +1,287 @@
+#cd /Users/smartlab
+#export PATH=~/miniconda3/bin:$PATH
+#conda install -c bioconda blasr
+
+cd /Volumes/Hyden2.0/94003_PacBio
+pigz -d *.fasta.gz
+cat PBG-3269.PB000379_Salix_purp_94003.CCS2.0000007537.fasta PBG-3269.PB000379_Salix_purple.CCS2.0000007041.fasta > 94003_PacBio_HiFi_combined.fasta
+cat m64019_220714_193023.hifi_reads.fasta m64335e_220719_214656.hifi_reads.fasta > 94003_PacBio_HiFi_combined_2.fasta
+pigz -d *.fastq
+cat m64019_220714_193023.hifi_reads.fastq m64335e_220719_214656.hifi_reads.fastq > 94003_PacBio_HiFi_combined_2.fastq
+pigz 94003_PacBio_HiFi_combined_2.fastq
+#align fasta to female reference (cannot produce BAM, produces blast like output with |'s connecting matched nucleotides)
+#blasr 94003_PacBio_HiFi_combined.fasta Spurpurea/v5.1/assembly/Spurpurea_519_v5.0.fa -m 0 --out 94003_PacBio_HiFi_combined.txt --nproc 24
+#try using BWA MEM
+bwa mem -t 24 Spurpurea/v5.1/assembly/Spurpurea_519_v5.0.fa 94003_PacBio_HiFi_combined.fasta.gz > 94003_PacBio_HiFi_combined.sam
+samtools view -S -b -@ 24 94003_PacBio_HiFi_combined.sam > 94003_PacBio_HiFi_combined.bam
+samtools sort 94003_PacBio_HiFi_combined.bam > 94003_PacBio_HiFi_combined.sorted.bam
+samtools index 94003_PacBio_HiFi_combined.sorted.bam
+#log into BioHPC and assemble genome
+ssh blh226@cbsulm14.biohpc.cornell.edu
+cd /workdir/blh226
+#install miniconda
+curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+sh Miniconda3-latest-Linux-x86_64.sh
+source $HOME/miniconda3/bin/activate
+#install hifiasm
+conda install -c bioconda hifiasm
+#Use FileZilla to transfer combined fastq.gz file
+screen -S PacBio
+screen -r PacBio
+hifiasm -o 94003_HiFi_assembly_2.asm -t 112 94003_PacBio_HiFi_combined_2.fastq.gz
+#convert to fasta
+awk '/^S/{print ">"$2;print $3}' 94003_HiFi_assembly_2.asm.bp.p_ctg.gfa > 94003_HiFi_assembly.asm.bp.p_ctg.fa
+awk '/^S/{print ">"$2;print $3}' 94003_HiFi_assembly_2.asm.bp.hap1.p_ctg.gfa > 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa
+awk '/^S/{print ">"$2;print $3}' 94003_HiFi_assembly_2.asm.bp.hap2.p_ctg.gfa > 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa
+awk '/^S/{print ">"$2;print $3}' 94003_HiFi_assembly_2.asm.bp.p_utg.gfa > 94003_HiFi_assembly.asm.bp.p_utg.fa
+
+#calculate genome size
+grep -v "^>" 94003_HiFi_assembly.asm.bp.p_ctg.fa | wc -c
+#468420862
+grep -v "^>" 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa | wc -c
+#447525430
+grep -v "^>" 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa | wc -c
+#406699500
+grep -v "^>" 94003_HiFi_assembly.asm.bp.p_utg.fa | wc -c
+#833003136
+#install minimap2
+conda install -c bioconda minimap2
+#compare assembled genome to 94006 assembly
+minimap2 -ax asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.p_ctg.fa > 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.sam
+minimap2 -ax asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa > 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.sam
+minimap2 -ax asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa > 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.sam
+minimap2 -ax asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.p_utg.fa > 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.sam
+
+samtools view -S -b -@112 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.sam > 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.bam
+samtools view -S -b -@112 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.sam > 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.bam
+samtools view -S -b -@112 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.sam > 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.bam
+samtools view -S -b -@112 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.sam > 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.bam
+
+samtools sort -@ 112 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.bam > 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.sorted.bam
+samtools sort -@ 112 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.bam > 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.sorted.bam
+samtools sort -@ 112 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.bam > 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.sorted.bam
+samtools sort -@ 112 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.bam > 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.sorted.bam
+
+samtools index 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.sorted.bam
+samtools index 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.sorted.bam
+samtools index 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.sorted.bam
+samtools index 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.sorted.bam
+
+minimap2 -x asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.p_ctg.fa > 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.paf
+minimap2 -x asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa > 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.paf
+minimap2 -x asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa > 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.paf
+minimap2 -x asm5 -t 112 Spurpurea_519_v5.0.fa 94003_HiFi_assembly.asm.bp.p_utg.fa > 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.paf
+
+#transfer resulting files back to Mac
+#find number of lines (contigs)
+grep ">" 94003_HiFi_assembly.asm.bp.p_utg.fa
+#2987 contigs
+grep ">" 94003_HiFi_assembly.asm.bp.p_ctg.fa
+#302 contigs
+grep ">" 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa
+#394 contigs
+grep ">" 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa
+#165 contigs
+
+#estimate genome size
+#conda install -c bioconda kmergenie
+#kmergenie 94003_PacBio_HiFi_combined.fastq.gz -t 24 --diploid
+
+#dotplot default settings
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.paf -o 94003_HiFi_assembly_2_ctg.plot -l
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.paf -o 94003_HiFi_assembly_2_hap1.ctg.plot -l
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.paf -o 94003_HiFi_assembly_2_hap2.ctg.plot -l
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.paf -o 94003_HiFi_assembly_2_utg.plot -l
+
+#dotplot with similarity colors
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.p_ctg.fa.aln.paf -o 94003_HiFi_assembly_2_ctg.similaity.plot -l -s
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa.aln.paf -o 94003_HiFi_assembly_2_hap1.ctg.similaity.plot -l -s
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.paf -o 94003_HiFi_assembly_2_hap2.ctg.similaity.plot -l -s
+dotPlotly/pafCoordsDotPlotly.R -i 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.paf -o 94003_HiFi_assembly_2_utg.similaity.plot -l -s
+
+#extract alignments from original alignment file
+awk '$6=="Chr15W"' 94003_HiFi_assembly.asm.bp.p_utg.fa.aln.paf > 94003_Chr15W.paf
+dotPlotly/pafCoordsDotPlotly.R -i 94003_Chr15W.paf -o 94003_Chr15W.plot -l
+awk '$6=="Chr15W"' 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa.aln.paf > 94003_htg2_Chr15W.paf
+dotPlotly/pafCoordsDotPlotly.R -i 94003_htg2_Chr15W.paf -o 94003_htg2_Chr15W.plot -l
+
+seqtk subseq Spurpurea_519_v5.0.fa Chr15W.txt > Chr15W.fa
+#15.7Mb
+seqtk subseq Spurpurea_519_v5.0.fa Chr15Z.txt > Chr15Z.fa
+#13.3Mb
+seqtk subseq 94003_HiFi_assembly.asm.bp.hap1.p_ctg.fa Chr15_htg1.txt > Chr15_htg1.fa
+#19.6Mb
+seqtk subseq 94003_HiFi_assembly.asm.bp.hap2.p_ctg.fa Chr15_htg2.txt > Chr15_htg2.fa
+#16.1Mb
+cat Chr15_htg1.fa Chr15_htg2.fa > Chr15_94003.fa
+cat Chr15W.fa Chr15Z.fa > Chr15_94006.fa
+minimap2 -x asm5 -t 22 Chr15_94006.fa Chr15_94003.fa > 94006_vs_94003_Chr15.paf
+minimap2 -x asm5 -t 22 Chr15W.fa Chr15_htg1.fa > 94006_vs_94003_Chr15W.paf
+dotPlotly/pafCoordsDotPlotly.R -i 94006_vs_94003_Chr15.paf -o 94006_vs_94003_Chr15.plot -l
+dotPlotly/pafCoordsDotPlotly.R -i 94006_vs_94003_Chr15.paf -o 94006_vs_94003_Chr15.similarity.plot -l -s
+dotPlotly/pafCoordsDotPlotly.R -i 94006_vs_94003_Chr15.paf -o 94006_vs_94003_Chr15.similarity.1000.plot -l -s -m 1000 -q 1000
+dotPlotly/pafCoordsDotPlotly.R -i 94006_vs_94003_Chr15.paf -o 94006_vs_94003_Chr15.100.plot -l -m 100 -q 100
+dotPlotly/pafCoordsDotPlotly.R -i 94006_vs_94003_Chr15W.paf -o 94006_vs_94003_Chr15W.plot -l
+awk '$6=="Chr15W"' 94006_vs_94003_Chr15.paf > 94006_vs_94003_Chr15W.paf
+dotPlotly/pafCoordsDotPlotly.R -i 94006_vs_94003_Chr15W.paf -o 94006_vs_94003_Chr15W.plot -l
+awk '$6=="Chr15W"' 94006_vs_94003_Chr15.paf > 94006_vs_94003_Chr15W.paf
+awk '$1=="h1tg000015l" && $9 >= 7715391 && $8 <= 9088374' 94006_vs_94003_Chr15W.paf > 94006_vs_94003_Chr15W_missing.paf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#annotate using maker
+#need reads_L.fq, reads_R.fq (trimmed), assembly.fa
+
+ssh blh226@cbsumm25.biohpc.cornell.edu
+cd /workdir/blh226
+mkdir tmp
+cp -rH /programs/maker/ ./
+cp -rH /programs/RepeatMasker ./
+/programs/RepeatModeler-2.0.1/BuildDatabase -name 94003 -engine ncbi 94003_HiFi_assembly.asm.bp.p_utg.fa
+/programs/RepeatModeler-2.0.1/RepeatModeler -pa 40 -engine ncbi -database 94003 >& repeatmodeler.log
+export PATH=/workdir/blh226/maker/bin:/workdir/blh226/RepeatMasker:/programs/snap:$PATH
+export ZOE=/programs/snap/Zoe
+export LD_LIBRARY_PATH=/programs/boost_1_62_0/lib
+maker -CTL
+#modify maker_opts.ctl file
+
+/usr/local/mpich/bin/mpiexec.hydra -n 39 maker -base 94003_rnd1 >& log1 &
+
+export PATH=/workdir/blh226/maker/bin:/workdir/blh226/RepeatMasker:/programs/snap:$PATH
+export ZOE=/programs/snap/Zoe
+export LD_LIBRARY_PATH=/programs/boost_1_62_0/lib
+
+mkdir snap1
+cd snap1
+gff3_merge -d ../94003_rnd1.maker.output/94003_rnd1_master_datastore_index.log
+maker2zff -l 50 -x 0.5 94003_rnd1.all.gff
+
+fathom -categorize 1000 genome.ann genome.dna
+fathom -export 1000 -plus uni.ann uni.dna
+forge export.ann export.dna
+hmm-assembler.pl 94003 . > ../94003-1.hmm
+mv 94003_rnd1.all.gff ../
+cd ..
+
+mkdir 94003_rnd1
+mv 94003_rnd1.maker.output/ 94003_rnd1/
+
+#modify maker_opts.ctl file
+/usr/local/mpich/bin/mpiexec.hydra -n 39 maker -base 94003_rnd2 >& log2 &
+
+mkdir snap2
+cd snap2
+gff3_merge -d ../94003_rnd2.maker.output/94003_rnd2_master_datastore_index.log
+maker2zff -l 50 -x 0.5 94003_rnd2.all.gff
+fathom -categorize 1000 genome.ann genome.dna
+fathom -export 1000 -plus uni.ann uni.dna
+forge export.ann export.dna
+hmm-assembler.pl 94003_rnd2 . > ../94003_rnd2.hmm
+mv 94003_rnd2.all.gff ..
+cd ..
+
+mkdir 94003_rnd2
+mv 94003_rnd2.maker.output/ 94003_rnd2/
+
+#modify maker_opts.ctl file
+
+/usr/local/mpich/bin/mpiexec.hydra -n 39 maker -base 94003_rnd3 >& log3 &
+
+gff3_merge -s -n -d 94003_rnd3.maker.output/94003_rnd3_master_datastore_index.log > 94003_rnd3.noseq.gff
+/programs/maker/AED_cdf_generator.pl -b 0.025 94003_rnd2.all.gff > AED_rnd2
+/programs/maker/AED_cdf_generator.pl -b 0.025 94003_rnd3.noseq.gff > AED_rnd3
+
+
+#transfer files to local computer
+#look at gff files, remove repeatmasker annotations
+
+awk '{if($2 == "maker") {print}}' 94003_rnd1.all.gff > 94003_rnd1.genes.gff
+awk '{if($2 == "maker") {print}}' 94003_rnd2.all.gff > 94003_rnd2.genes.gff
+awk '{if($2 == "maker") {print}}' 94003_rnd3.noseq.gff > 94003_rnd3.genes.gff
+
+cat 94003_rnd3.genes.gff | wc -l
+#905992
+94003_rnd3.genes.gff | grep -v "^#" | cut -f 3 | sort | uniq -c
+#359696 CDS
+#368177 exon
+#33626 five_prime_UTR
+#58058 gene
+#58058 mRNA
+#28377 three_prime_UTR
+
+cat 94003_rnd2.genes.gff | wc -l
+#884531
+cat 94003_rnd2.genes.gff | grep -v "^#" | cut -f 3 | sort | uniq -c
+#345431 CDS
+#354898 exon
+#35136 five_prime_UTR
+#58932 gene
+#58932 mRNA
+#31202 three_prime_UTR
+cat 94003_rnd1.genes.gff | wc -l
+#1056353
+#cat 94003_rnd1.genes.gff | grep -v "^#" | cut -f 3 | sort | uniq -c
+#420683 CDS
+#362840 exon
+#66688 five_prime_UTR
+#66696 gene
+#80968 mRNA
+#58478 three_prime_UTR
+
+#run interproscan and BLAST to 94006 to find homologs
+/programs/gffread-0.9.12/gffread/gffread -w 94003_transcripts.fa -g 94003_HiFi_assembly.asm.bp.p_utg.fa 94003_rnd3.genes.gff
+/programs/gffread-0.9.12/gffread/gffread -y 94003_protein.fa -g 94003_HiFi_assembly.asm.bp.p_utg.fa 94003_rnd3.genes.gff
+
+wget ftp://ftp.ebi.ac.uk/pub/software/unix/iprscan/5/5.56-89.0/interproscan-5.56-89.0-64-bit.tar.gz
+tar xvfz interproscan-5.56-89.0-64-bit.tar.gz
+cd interproscan-5.56-89.0/
+cp ../*_protein.fa .
+## modify the interproscan.properties file in the interproscan directory, based on the number of CPUs of the computer you are using. Change these two lines. Here I use 40 for BioHPC medium memory gen2 machine
+#number.of.embedded.workers=39
+#maxnumber.of.embedded.workers=39
+./interproscan.sh -b 94003 -i 94003_protein.fa --goterms --pathways --iprlookup -t p
+
+singularity pull busco_5.1.3.sif docker://quay.io/biocontainers/busco:5.1.3--pyhdfd78af_0
+./busco_5.1.3.sif busco -h
+./busco_5.1.3.sif busco --list-datasets
+./busco_5.1.3.sif busco -i 94003_protein.fa -l eudicots_odb10 -o 94003_protein_BUSCO -m protein -c 39
+./busco_5.1.3.sif busco -i 94003_HiFi_assembly.asm.bp.p_utg.fa -l eudicots_odb10 -o 94003_BUSCO -m geno -c 39
+
+makeblastdb -in Spurpurea_519_v5.1.transcript.fa -input_type fasta -dbtype nucl -out Spurpurea_519_v5.1_transcripts
+makeblastdb -in Spurpurea_519_v5.0.fa -input_type fasta -dbtype nucl -out Spurpurea_519_v5.0
+blastn -db Spurpurea_519_v5.1_transcripts -query 94003_transcripts.fa -out 94003_vs_Spurpurea_v5.1_BLAST.out -max_target_seqs 1 -num_threads 40 -outfmt 6
+blastn -db Spurpurea_519_v5.0 -query 94003_transcripts.fa -out 94003_vs_Spurpurea_v5.0_BLAST.out -max_target_seqs 1 -num_threads 40 -outfmt 6
+
+
+#make defline file
+awk '$4=="PANTHER" {print $0}' 94003.tsv > 94003_PANTHER.tsv
+
+R
+defline<-read.delim('Spurpurea_519_v5.1.defline.txt', sep="\t", header=FALSE)
+info<-read.delim("Spurpurea_519_v5.1.annotation_info.txt", header=TRUE)
+BLAST<-read.delim("94003_vs_Spurpurea_v5.1_BLAST.out", header=FALSE)
+PANTHER<-read.delim("94003_PANTHER.tsv", header=FALSE)
+output<-cbind(PANTHER$V1, PANTHER$V5, PANTHER$V6)
+library(tidyverse)
+BLAST<-BLAST[!duplicated(BLAST$V1),]
+match<-match(output[,1], BLAST[,1])
+output<-cbind(output, BLAST[match,2])
+match2<-match(output[,4], defline[,1])
+output<-cbind(output, defline[match2,3])
+write.table(output, '94003_mRNA_info.txt', row.names=FALSE, col.names=FALSE, sep="\t", quote = FALSE)
